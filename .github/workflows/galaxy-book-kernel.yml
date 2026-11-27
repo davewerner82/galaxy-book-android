@@ -102,15 +102,22 @@ jobs:
           set -euo pipefail
           cp report/stock.config source/.config
           cd source
-          for opt in HID HID_GENERIC I2C I2C_HID_ACPI HID_MULTITOUCH HID_WACOM I2C_DESIGNWARE_PLATFORM IKCONFIG IKCONFIG_PROC; do
+          # The ACPI I2C-HID driver needs built-in DRM when DRM is enabled.
+          required=(DRM HID HID_GENERIC I2C I2C_HID I2C_HID_ACPI HID_MULTITOUCH HID_WACOM I2C_DESIGNWARE_PLATFORM IKCONFIG IKCONFIG_PROC)
+          for opt in "${required[@]}"; do
             scripts/config --enable "$opt"
           done
           make ARCH=x86_64 LLVM=1 olddefconfig
-          for opt in HID HID_GENERIC I2C I2C_HID_ACPI I2C_HID_CORE HID_MULTITOUCH HID_WACOM I2C_DESIGNWARE_PLATFORM; do
-            grep -qx "CONFIG_$opt=y" .config
-          done
           cp .config ../report/candidate.config
           scripts/diffconfig ../report/stock.config .config > ../report/config-diff.txt
+          invalid=0
+          for opt in "${required[@]}" I2C_HID_CORE; do
+            if ! grep -qx "CONFIG_$opt=y" .config; then
+              echo "::error::CONFIG_$opt must be y, resolved to $(scripts/config --state "$opt")"
+              invalid=1
+            fi
+          done
+          test "$invalid" = 0
           make -j"$(nproc)" ARCH=x86_64 LLVM=1 bzImage modules
           make ARCH=x86_64 LLVM=1 INSTALL_MOD_PATH="$GITHUB_WORKSPACE/candidate" INSTALL_MOD_STRIP=1 modules_install
           cp arch/x86/boot/bzImage ../candidate/kernel
