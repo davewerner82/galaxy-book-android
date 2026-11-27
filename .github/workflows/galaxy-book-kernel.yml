@@ -19,19 +19,31 @@ jobs:
           mkdir -p report candidate
           sudo apt-get update
           sudo apt-get install -y clang lld llvm gcc g++ make bc bison flex libssl-dev libelf-dev libncurses-dev dwarves cpio xz-utils zstd lz4 lzop p7zip-full git curl kmod rsync
+      - name: Restore verified stock boot files
+        id: stock-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: stock
+          key: zenith-20240715-stock-boot-v1
       - name: Download and verify official base release
         shell: bash
         run: |
           set -euo pipefail
           name="Bliss-Zenith-v16.9.6-x86_64-OFFICIAL-gapps-${RELEASE}.iso"
           base="https://downloads.sourceforge.net/project/blissos-x86/Official/BlissOSZenith/Gapps/Generic"
-          curl -fL --retry 3 "$base/$name.sha256" -o report/iso.sha256
-          curl -fL --retry 3 "$base/$name" -o "$name"
-          expected=$(grep -Eo '[a-fA-F0-9]{64}' report/iso.sha256 | head -n1)
-          test "${#expected}" = 64
-          echo "$expected  $name" | sha256sum -c -
-          mkdir -p stock
-          7z e -y "$name" -ostock kernel initrd.img
+          if [ ! -s stock/kernel ] || [ ! -s stock/initrd.img ] || [ ! -s stock/iso.sha256 ] || [ ! -s stock/boot.sha256 ]; then
+            mkdir -p stock
+            curl -fL --connect-timeout 30 --max-time 120 --retry 2 "$base/$name.sha256" -o stock/iso.sha256
+            curl -fL --connect-timeout 30 --max-time 7200 --speed-time 120 --speed-limit 10240 --retry 2 --retry-max-time 7500 "$base/$name" -o "$name"
+            expected=$(grep -Eo '[a-fA-F0-9]{64}' stock/iso.sha256 | head -n1)
+            test "${#expected}" = 64
+            echo "$expected  $name" | sha256sum -c -
+            7z e -y "$name" -ostock kernel initrd.img
+            (cd stock && sha256sum kernel initrd.img > boot.sha256)
+            rm "$name"
+          fi
+          (cd stock && sha256sum -c boot.sha256)
+          cp stock/iso.sha256 report/iso.sha256
           test -s stock/kernel
           test -s stock/initrd.img
           sha256sum stock/* > report/stock-sha256.txt
@@ -46,19 +58,32 @@ jobs:
           print(version)
           pathlib.Path('report/kernel-version.txt').write_text(version+'\n')
           PY
-          curl -fL --retry 2 "$base/Changelog-Bliss-Zenith-v16.9.6-x86_64-OFFICIAL-gapps-${RELEASE}.txt" -o report/release-changelog.txt || true
-          rm "$name"
-      - name: Resolve exact kernel source and inspect original configuration
+          curl -fL --connect-timeout 30 --max-time 120 --retry 2 "$base/Changelog-Bliss-Zenith-v16.9.6-x86_64-OFFICIAL-gapps-${RELEASE}.txt" -o report/release-changelog.txt || true
+      - name: Cache stock boot files for future runs
+        if: steps.stock-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: stock
+          key: zenith-20240715-stock-boot-v1
+      - name: Resolve historical Zenith source and inspect original configuration
         shell: bash
         run: |
           set -euo pipefail
           version=$(cat report/kernel-version.txt)
           sha=$(echo "$version" | grep -Eo -- '-g[0-9a-f]{7,40}' | head -n1 | cut -c3- || true)
-          if [ -z "$sha" ]; then
-            echo 'No embedded source commit. Do not build against an assumed revision.' | tee report/BLOCKED.txt
-            exit 1
+          if [ -n "$sha" ]; then
+            full=$(curl -fsSL --connect-timeout 30 --max-time 120 --retry 2 "https://api.github.com/repos/android-generic/kernel-zenith/commits/$sha" | jq -er '.sha')
+            echo 'Source revision identified by embedded commit abbreviation.' > report/source-provenance.txt
+          else
+            # The verified July ISO reports 6.9.9-zenith, built 2024-07-15 12:34:16 UTC.
+            # Resolve a historical candidate; date + version is NOT proof of an exact source match.
+            grep -q '^6\.9\.9-zenith .*Jul 15 .*2024' report/kernel-version.txt
+            curl -fsSL --connect-timeout 30 --max-time 120 --retry 2 'https://api.github.com/repos/android-generic/kernel-zenith/commits?sha=6.9&until=2024-07-15T12%3A34%3A16Z&per_page=1' -o report/source-candidate.json
+            full=$(jq -er '.[0].sha' report/source-candidate.json)
+            echo 'Historical candidate from Zenith 6.9 branch at stock kernel build date. Exact original source revision unverified. Experimental only.' > report/source-provenance.txt
           fi
-          full=$(curl -fsSL --retry 3 "https://api.github.com/repos/android-generic/kernel-zenith/commits/$sha" | jq -er '.sha')
+          [[ "$full" =~ ^[0-9a-f]{40}$ ]]
+          echo "Candidate source: $full"
           git init source
           git -C source remote add origin "$UPSTREAM"
           git -C source fetch --depth=1 origin "$full"
@@ -97,7 +122,7 @@ jobs:
           file candidate/kernel
           sha256sum candidate/kernel > report/candidate-sha256.txt
           printf '%s\n' 'EXPERIMENTAL: compiled kernel and matching modules only. Not a complete Android image. Do not install until initrd and Android system module integration are verified. No physical hardware validation.' > candidate/README.txt
-          cp report/{stock-sha256.txt,source-commit.txt,candidate-version.txt,config-diff.txt,candidate-sha256.txt} candidate/
+          cp report/{stock-sha256.txt,source-commit.txt,source-provenance.txt,candidate-version.txt,config-diff.txt,candidate-sha256.txt} candidate/
       - name: Upload build evidence
         if: always()
         uses: actions/upload-artifact@v4
