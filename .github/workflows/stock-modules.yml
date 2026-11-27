@@ -30,12 +30,14 @@ jobs:
           else
             sudo mount -o loop,ro outer/system.img android
           fi
-          dir=$(find android -name modules.dep -printf '%h\n' | grep -m1 '/lib/modules' )
+          dep=$(find android/system/lib/modules -name modules.dep -print -quit)
+          test -n "$dep"
+          dir=$(dirname "$dep")
           test -s "$dir/modules.alias"
           cp "$dir/modules.dep" "$dir/modules.alias" report
-          find android -type f \( -iname '*.idc' -o -iname 'modules.load*' \) > report/input-and-module-configs.txt
+          sudo find android/system -type f \( -iname '*.idc' -o -iname 'modules.load*' \) > report/input-and-module-configs.txt
           for driver in i2c-hid-acpi i2c-hid hid-multitouch wacom; do
-            module=$(find "$dir" -type f \( -name "$driver.ko" -o -name "$driver.ko.*" \) -print -quit)
+            module=$(find "$dir" -type f \( -name "$driver.ko" -o -name "$driver.ko.*" -o -name "${driver//-/_}.ko" -o -name "${driver//-/_}.ko.*" \) -print -quit)
             test -n "$module" || { echo "::error::Missing $driver in $dir"; exit 1; }
             modinfo "$module" >> report/driver-metadata.txt
             echo "$driver $(modinfo -F vermagic "$module")" | tee -a report/driver-versions.txt
