@@ -1,0 +1,46 @@
+name: Package and test Windows-staged Galaxy Book Android
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'package/**'
+      - '.github/workflows/tablet-package.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: galaxy-book-experimental-kernel
+          run-id: 46002582645
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Fetch the pinned Android release
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cpio squashfs-tools e2fsprogs kmod gdisk ntfs-3g qemu-system-x86 p7zip-full
+          curl -fsSL --connect-timeout 30 --max-time 1800 --speed-time 120 --speed-limit 10240 --retry 2 'https://downloads.sourceforge.net/project/blissos-x86/Official/BlissOSZenith/Gapps/Generic/Bliss-Zenith-v16.9.6-x86_64-OFFICIAL-gapps-20240715.iso' -o base.iso
+      - name: Integrate matching modules and validate stock driver coverage
+        run: bash package/build.sh
+      - name: Test the staged system and initrd on a virtual SATA disk
+        run: bash package/guest-test.sh
+      - name: Save integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tablet-integration-log
+          path: serial.log
+          if-no-files-found: ignore
+      - name: Upload verified Windows test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: GalaxyBook-SM-W727-Windows-Test
+          path: out/
+          compression-level: 1
+          retention-days: 30
+
