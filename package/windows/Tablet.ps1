@@ -47,8 +47,7 @@ if($Action -in 'Stage','Check') {
     return
 }
 function Read-BootManager {Native 'bcdedit.exe' @('/enum','{fwbootmgr}')}
-function Get-MountedPartition($drive) {
-    # mountvol /S can create a DOS drive mapping without an MSFT_Partition.DriveLetter.
+function Initialize-VolumeIdentity {
     if (-not ('GalaxyBook.VolumeIdentity' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
@@ -59,6 +58,13 @@ namespace GalaxyBook {
     public static class VolumeIdentity {
         [StructLayout(LayoutKind.Sequential)]
         public struct DeviceNumber { public uint DeviceType, DiskNumber, PartitionNumber; }
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        static extern bool DefineDosDevice(uint flags, string drive, string target);
+        public static void SetAlias(string drive, string target, bool remove) {
+            // Raw NT path, no broadcast. Remove only the exact mapping we created.
+            if (!DefineDosDevice(remove ? 15u : 9u, drive, target))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         static extern SafeFileHandle CreateFile(string path, uint access, uint share,
             IntPtr security, uint disposition, uint flags, IntPtr template);
@@ -82,7 +88,6 @@ namespace GalaxyBook {
 }
 '@
     }
-    [GalaxyBook.VolumeIdentity]::Read($drive)
 }
 function Install-GrubConfig($source,$cfg,$expected) {
     $incoming=$cfg+'.gb-new'
@@ -106,12 +111,16 @@ $letters=[Environment]::GetLogicalDrives()
 $letter=@('S','T','U','V','W','Y','Z') | Where-Object {$letters -notcontains ($_+':\')} | Select-Object -First 1
 if(!$letter){throw 'No unused drive letter for the EFI partition.'}
 $drive=$letter+':'
-$null=Native 'mountvol.exe' @($drive,'/S')
+$efi=@(Get-Partition -DiskNumber $disk.Number | Where-Object {
+    $_.IsSystem -and ([guid]$_.GptType) -eq [guid]'c12a7328-f81f-11d2-ba4b-00a0c93ec93b'
+})
+if($efi.Count -ne 1){throw 'Could not uniquely identify the Windows EFI System Partition.'}
+$target='\Device\Harddisk{0}\Partition{1}' -f $disk.Number,$efi[0].PartitionNumber
+Initialize-VolumeIdentity
+[GalaxyBook.VolumeIdentity]::SetAlias($drive,$target,$false)
 try {
-    $mounted=Get-MountedPartition $drive
-    if($mounted.DiskNumber -ne $disk.Number){throw 'EFI disk mismatch.'}
-    $efi=Get-Partition -DiskNumber $mounted.DiskNumber -PartitionNumber $mounted.PartitionNumber
-    if(([guid]$efi.GptType) -ne [guid]'c12a7328-f81f-11d2-ba4b-00a0c93ec93b'){throw 'Mounted partition is not an EFI System Partition.'}
+    $mounted=[GalaxyBook.VolumeIdentity]::Read($drive)
+    if($mounted.DiskNumber -ne $disk.Number -or $mounted.PartitionNumber -ne $efi[0].PartitionNumber){throw 'EFI partition identity mismatch.'}
     $cfg="$drive\EFI\Boot\grub.cfg"
     $bak="$stage\original-grub.cfg"
     $state="$stage\boot-state.json"
@@ -187,5 +196,5 @@ try {
         throw
     }
     Write-Output 'One test boot is armed. Use Windows Restart when ready. Restore cancels it.'
-} finally {$null=Native 'mountvol.exe' @($drive,'/D')}
+} finally {[GalaxyBook.VolumeIdentity]::SetAlias($drive,$target,$true)}
 
