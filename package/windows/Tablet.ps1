@@ -39,7 +39,9 @@ if($Action -in 'Stage','Check') {
     } finally {$stream.Dispose()}
     if((Get-Item "$pending\data.img").Length -ne 2GB){throw 'Test data image size mismatch.'}
     if((Get-FileHash "$pending\system.efs").Hash -ne '8b0c68d88f8e9bf189ba8707328082ab8412c3e557c1f605ff5e43dbe4300572'){throw 'Staged system image verification failed.'}
-    [IO.File]::WriteAllText("$pending\stage.key",[guid]::NewGuid().ToString('N'))
+    $stageKey=[guid]::NewGuid().ToString('N')
+    [IO.File]::WriteAllText("$pending\stage.key",$stageKey)
+    [IO.File]::WriteAllText("$pending\id-$stageKey",$stageKey)
     [IO.Directory]::Move($pending,$stage)
     Write-Output "Staged $stage. Boot settings have not been changed."
     return
@@ -126,6 +128,7 @@ try {
     if($answer -ne 'Yes'){throw 'Test cancelled.'}
     $key=(Get-Content "$stage\stage.key" -Raw).Trim()
     if($key -notmatch '^[a-f0-9]{32}$'){throw 'Invalid stage key.'}
+    if(!(Test-Path -LiteralPath "$stage\id-$key" -PathType Leaf)){throw 'Missing GRUB stage marker.'}
     $num=[int]$part.PartitionNumber
     $template=Get-Content (Join-Path $PSScriptRoot 'test-grub.cfg.in') -Raw
     $script=$template.Replace('PARTNUM',"$num").Replace('STAGEKEY',$key).Replace('CONSOLEARGS','').Replace([string][char]13,"")

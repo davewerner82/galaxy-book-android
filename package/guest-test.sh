@@ -17,7 +17,7 @@ source /EFI/BOOT/grub.cfg
 echo "GB_EFI_CONFIG_RETURNED"
 reboot
 EOF
-grub-mkimage -O x86_64-efi -p /EFI/BOOT -c boot.cfg -o test-loader.efi part_gpt fat ntfs regexp serial terminal normal configfile linux boot reboot test echo
+grub-mkimage -O x86_64-efi -p /EFI/BOOT -c boot.cfg -o test-loader.efi part_gpt fat ntfs search search_fs_file serial terminal normal configfile linux boot reboot test echo
 sudo cp test-loader.efi esp/EFI/BOOT/BOOTX64.EFI
 sed -e 's/PARTNUM/2/g' -e "s/STAGEKEY/$key/g" -e 's/CONSOLEARGS/console=tty0 console=ttyS0/' package/windows/test-grub.cfg.in | sudo tee esp/EFI/BOOT/grub.cfg >/dev/null
 grub-script-check esp/EFI/BOOT/grub.cfg
@@ -29,6 +29,7 @@ sudo mkdir guest/GalaxyBookTest
 sudo cp stock/system.efs out/kernel out/initrd.img blank-data.img guest/GalaxyBookTest/
 sudo mv guest/GalaxyBookTest/blank-data.img guest/GalaxyBookTest/data.img
 echo "$key" | sudo tee guest/GalaxyBookTest/stage.key >/dev/null
+sudo cp guest/GalaxyBookTest/stage.key "guest/GalaxyBookTest/id-$key"
 sudo umount guest
 sudo losetup -d "$loop"
 accel=tcg
