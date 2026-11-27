@@ -47,6 +47,43 @@ if($Action -in 'Stage','Check') {
     return
 }
 function Read-BootManager {Native 'bcdedit.exe' @('/enum','{fwbootmgr}')}
+function Get-MountedPartition($drive) {
+    # mountvol /S can create a DOS drive mapping without an MSFT_Partition.DriveLetter.
+    if (-not ('GalaxyBook.VolumeIdentity' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+namespace GalaxyBook {
+    public static class VolumeIdentity {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DeviceNumber { public uint DeviceType, DiskNumber, PartitionNumber; }
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        static extern SafeFileHandle CreateFile(string path, uint access, uint share,
+            IntPtr security, uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        static extern bool DeviceIoControl(SafeFileHandle handle, uint code, IntPtr input,
+            uint inputSize, out DeviceNumber result, int resultSize, out uint bytes, IntPtr asyncPtr);
+        public static DeviceNumber Read(string drive) {
+            using (var h = CreateFile(@"\\.\" + drive, 0, 7, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
+                if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+                DeviceNumber value;
+                uint bytes;
+                int size = Marshal.SizeOf(typeof(DeviceNumber));
+                // IOCTL_STORAGE_GET_DEVICE_NUMBER requires no data read or write access.
+                if (!DeviceIoControl(h, 0x002D1080, IntPtr.Zero, 0, out value, size, out bytes, IntPtr.Zero))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (bytes != size || value.DeviceType != 7) throw new InvalidOperationException("Unexpected disk identity.");
+                return value;
+            }
+        }
+    }
+}
+'@
+    }
+    [GalaxyBook.VolumeIdentity]::Read($drive)
+}
 function Install-GrubConfig($source,$cfg,$expected) {
     $incoming=$cfg+'.gb-new'
     $previous=$cfg+'.gb-previous'
@@ -71,7 +108,10 @@ if(!$letter){throw 'No unused drive letter for the EFI partition.'}
 $drive=$letter+':'
 $null=Native 'mountvol.exe' @($drive,'/S')
 try {
-    if((Get-Partition -DriveLetter $letter).DiskNumber -ne $disk.Number){throw 'EFI disk mismatch.'}
+    $mounted=Get-MountedPartition $drive
+    if($mounted.DiskNumber -ne $disk.Number){throw 'EFI disk mismatch.'}
+    $efi=Get-Partition -DiskNumber $mounted.DiskNumber -PartitionNumber $mounted.PartitionNumber
+    if(([guid]$efi.GptType) -ne [guid]'c12a7328-f81f-11d2-ba4b-00a0c93ec93b'){throw 'Mounted partition is not an EFI System Partition.'}
     $cfg="$drive\EFI\Boot\grub.cfg"
     $bak="$stage\original-grub.cfg"
     $state="$stage\boot-state.json"
