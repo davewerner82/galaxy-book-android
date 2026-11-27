@@ -143,8 +143,13 @@ try {
             $hash=(Get-FileHash $cfg).Hash
             if($hash -ne $s.original -and $hash -ne $s.test){throw 'EFI configuration has changed independently. Backup retained.'}
         }
-        Install-GrubConfig $bak $cfg $s.original
+        if(!(Test-Path $cfg) -or (Get-FileHash $cfg).Hash -ne $s.original){
+            Install-GrubConfig $bak $cfg $s.original
+        }
         if((Get-FileHash $cfg).Hash -ne $s.original){throw 'Restore verification failed.'}
+        if((Read-BootManager) -match ('(?im)^\s*bootsequence\s+'+[regex]::Escape($s.entry)+'\s*$')){
+            throw 'The Android one-time boot is still pending. Saved state retained.'
+        }
         Remove-Item -LiteralPath $state
         Write-Output 'Original GRUB configuration restored and verified. Backup retained.'
         return
