@@ -120,22 +120,15 @@ try {
     })
     if($ids.Count -ne 1){throw 'Could not uniquely identify the existing Android EFI loader.'}
     if((Get-Content $cfg -Raw) -notmatch '/AndroidOS/kernel'){throw 'Unexpected existing GRUB configuration.'}
-    if((Read-Host 'Remove the SD card, save your work, then type TEST to arm one boot') -cne 'TEST'){throw 'Test cancelled.'}
+    Add-Type -AssemblyName System.Windows.Forms
+    $prompt="Remove the SD card and save your work. Have you verified access to Windows recovery and do you want the next restart to test Android?"
+    $answer=[Windows.Forms.MessageBox]::Show($prompt,'Galaxy Book one-time test','YesNo','Question','Button2')
+    if($answer -ne 'Yes'){throw 'Test cancelled.'}
     $key=(Get-Content "$stage\stage.key" -Raw).Trim()
     if($key -notmatch '^[a-f0-9]{32}$'){throw 'Invalid stage key.'}
     $num=[int]$part.PartitionNumber
-    $script=@'
-if regexp --set=1:disk '^\(([^,)]+),gpt[0-9]+\)' "$cmdpath"; then
-  set root=($disk,gptPARTNUM)
-  if [ -f /GalaxyBookTest/stage.key ]; then
-    linux /GalaxyBookTest/kernel root=/dev/ram0 SRC=GalaxyBookTest GBROOT=/dev/sdaPARTNUM GBKEY=STAGEKEY panic=10
-    initrd /GalaxyBookTest/initrd.img
-    boot
-  fi
-fi
-reboot
-'@
-    $script=$script.Replace('PARTNUM',"$num").Replace('STAGEKEY',$key).Replace([string][char]13,"")
+    $template=Get-Content (Join-Path $PSScriptRoot 'test-grub.cfg.in') -Raw
+    $script=$template.Replace('PARTNUM',"$num").Replace('STAGEKEY',$key).Replace('CONSOLEARGS','').Replace([string][char]13,"")
     $testFile="$stage\test-grub.cfg"
     [IO.File]::WriteAllText($testFile,$script+[char]10,[Text.Encoding]::ASCII)
     Copy-Item -LiteralPath $cfg -Destination $bak -Force

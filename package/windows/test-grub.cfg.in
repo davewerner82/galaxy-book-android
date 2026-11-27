@@ -1,0 +1,9 @@
+if regexp --set=1:disk '^\(([^,)]+),gpt[0-9]+\)' "$cmdpath"; then
+  set root=($disk,gptPARTNUM)
+  if [ -f /GalaxyBookTest/stage.key ]; then
+    linux /GalaxyBookTest/kernel root=/dev/ram0 SRC=GalaxyBookTest GBROOT=/dev/sdaPARTNUM GBKEY=STAGEKEY panic=10 CONSOLEARGS
+    initrd /GalaxyBookTest/initrd.img
+    boot
+  fi
+fi
+reboot

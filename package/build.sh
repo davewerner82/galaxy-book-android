@@ -40,5 +40,5 @@ cp package/candidate-module-gap.txt "$out/"
   echo "Integration commit: $GITHUB_SHA"
   echo "Integration run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 } > "$out/build-manifest.txt"
-(cd "$out" && sha256sum kernel initrd.img data.img.gz > payload.sha256)
+(cd "$out" && sha256sum kernel initrd.img data.img.gz test-grub.cfg.in > payload.sha256)
 

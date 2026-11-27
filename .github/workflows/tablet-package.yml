@@ -17,7 +17,7 @@ jobs:
       - name: Install integration tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends cpio squashfs-tools e2fsprogs kmod gdisk ntfs-3g qemu-system-x86 p7zip-full
+          sudo apt-get install -y --no-install-recommends cpio squashfs-tools e2fsprogs kmod gdisk ntfs-3g grub-efi-amd64-bin grub-common ovmf dosfstools qemu-system-x86 p7zip-full
       - uses: actions/cache/restore@v4
         id: release
         with:
