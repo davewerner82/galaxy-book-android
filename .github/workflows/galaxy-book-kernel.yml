@@ -1,0 +1,114 @@
+name: Galaxy Book 12 - Zenith kernel build
+on:
+  push:
+    paths:
+      - '.github/workflows/galaxy-book-kernel.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    env:
+      RELEASE: '20240715'
+      UPSTREAM: https://github.com/android-generic/kernel-zenith.git
+    steps:
+      - name: Install build dependencies
+        run: |
+          mkdir -p report candidate
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm gcc g++ make bc bison flex libssl-dev libelf-dev libncurses-dev dwarves cpio xz-utils zstd lz4 lzop p7zip-full git curl kmod rsync
+      - name: Download and verify official base release
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="Bliss-Zenith-v16.9.6-x86_64-OFFICIAL-gapps-${RELEASE}.iso"
+          base="https://downloads.sourceforge.net/project/blissos-x86/Official/BlissOSZenith/Gapps/Generic"
+          curl -fL --retry 3 "$base/$name.sha256" -o report/iso.sha256
+          curl -fL --retry 3 "$base/$name" -o "$name"
+          expected=$(grep -Eo '[a-fA-F0-9]{64}' report/iso.sha256 | head -n1)
+          test "${#expected}" = 64
+          echo "$expected  $name" | sha256sum -c -
+          mkdir -p stock
+          7z e -y "$name" -ostock kernel initrd.img
+          test -s stock/kernel
+          test -s stock/initrd.img
+          sha256sum stock/* > report/stock-sha256.txt
+          stat -c '%n %s' stock/* > report/stock-sizes.txt
+          file stock/* > report/stock-types.txt
+          python3 - <<'PY'
+          import pathlib,struct
+          p=pathlib.Path('stock/kernel').read_bytes()
+          assert p[0x202:0x206]==b'HdrS'
+          offset=0x200+struct.unpack_from('<H',p,0x20e)[0]
+          version=p[offset:].split(b'\x00',1)[0].decode('ascii','replace')
+          print(version)
+          pathlib.Path('report/kernel-version.txt').write_text(version+'\n')
+          PY
+          curl -fL --retry 2 "$base/Changelog-Bliss-Zenith-v16.9.6-x86_64-OFFICIAL-gapps-${RELEASE}.txt" -o report/release-changelog.txt || true
+          rm "$name"
+      - name: Resolve exact kernel source and inspect original configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cat report/kernel-version.txt)
+          sha=$(echo "$version" | grep -Eo -- '-g[0-9a-f]{7,40}' | head -n1 | cut -c3- || true)
+          if [ -z "$sha" ]; then
+            echo 'No embedded source commit. Do not build against an assumed revision.' | tee report/BLOCKED.txt
+            exit 1
+          fi
+          full=$(curl -fsSL --retry 3 "https://api.github.com/repos/android-generic/kernel-zenith/commits/$sha" | jq -er '.sha')
+          git init source
+          git -C source remote add origin "$UPSTREAM"
+          git -C source fetch --depth=1 origin "$full"
+          git -C source checkout --detach FETCH_HEAD
+          git -C source rev-parse HEAD > report/source-commit.txt
+          git -C source submodule update --init --recursive --depth 1
+          git -C source submodule status --recursive > report/submodules.txt
+          bash source/scripts/extract-ikconfig stock/kernel > report/stock.config
+          grep -q '^CONFIG_X86_64=y' report/stock.config
+          grep -E '^(# )?CONFIG_(I2C_HID|HID_MULTITOUCH|HID_WACOM|I2C_DESIGNWARE|DRM_I915|MODULES|MODVERSIONS|MODULE_SIG|LOCALVERSION)' report/stock.config | tee report/stock-driver-config.txt
+          make -s -C source kernelversion > report/source-version.txt
+          test "$(cat report/source-version.txt)" = "$(echo "$version" | grep -Eo '^[0-9]+\.[0-9]+\.[0-9]+')"
+      - name: Compile experimental built-in touchscreen drivers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp report/stock.config source/.config
+          cd source
+          for opt in HID HID_GENERIC I2C I2C_HID_ACPI HID_MULTITOUCH HID_WACOM I2C_DESIGNWARE_PLATFORM IKCONFIG IKCONFIG_PROC; do
+            scripts/config --enable "$opt"
+          done
+          make ARCH=x86_64 LLVM=1 olddefconfig
+          for opt in HID HID_GENERIC I2C I2C_HID_ACPI I2C_HID_CORE HID_MULTITOUCH HID_WACOM I2C_DESIGNWARE_PLATFORM; do
+            grep -qx "CONFIG_$opt=y" .config
+          done
+          cp .config ../report/candidate.config
+          scripts/diffconfig ../report/stock.config .config > ../report/config-diff.txt
+          make -j"$(nproc)" ARCH=x86_64 LLVM=1 bzImage modules
+          make ARCH=x86_64 LLVM=1 INSTALL_MOD_PATH="$GITHUB_WORKSPACE/candidate" INSTALL_MOD_STRIP=1 modules_install
+          cp arch/x86/boot/bzImage ../candidate/kernel
+          make -s ARCH=x86_64 LLVM=1 kernelrelease > ../report/candidate-version.txt
+          cp Module.symvers ../report/
+          rm -f ../candidate/lib/modules/*/build ../candidate/lib/modules/*/source
+          cd ..
+          test -s candidate/kernel
+          file candidate/kernel
+          sha256sum candidate/kernel > report/candidate-sha256.txt
+          printf '%s\n' 'EXPERIMENTAL: compiled kernel and matching modules only. Not a complete Android image. Do not install until initrd and Android system module integration are verified. No physical hardware validation.' > candidate/README.txt
+          cp report/{stock-sha256.txt,source-commit.txt,candidate-version.txt,config-diff.txt,candidate-sha256.txt} candidate/
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenith-build-report
+          path: report/
+          retention-days: 7
+      - name: Upload experimental kernel and modules
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galaxy-book-experimental-kernel
+          path: candidate/
+          retention-days: 7
