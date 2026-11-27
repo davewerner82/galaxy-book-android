@@ -37,12 +37,26 @@ base=/mnt/$SRC
 [ "$(cat "$base/stage.key")" = "$GBKEY" ] || fail_test "unexpected stage"
 mkdir -p "$base/logs"
 exec 2>>"$base/logs/initrd.log"
+# Keep an open kernel-log reader across the Android init handoff. Bound disk use.
+if [ -c /dev/kmsg ]; then
+    (cat /dev/kmsg | head -c 2097152) > "$base/logs/kernel-through-android.txt" 2>/dev/null &
+fi
 mount -t erofs -o loop,ro "$base/system.efs" /sfs || fail_test "stock system container"
 mount -o loop,ro /sfs/system.img /android || fail_test "stock Android system"
-mount -t squashfs -o loop,ro "$base/modules.sfs" /android/system/lib/modules || fail_test "matching modules"
-[ -s "/android/system/lib/modules/$(uname -r)/modules.dep" ] || fail_test "module index"
-echo "GB_MODULES_READY $(uname -r)" | tee -a "$base/logs/initrd.log" /dev/console
+[ -s /android/system/lib/modules/modules.dep ] || fail_test "module index"
 ''' + init[stop:]
+start = init.index("ln -s ../system/lib/firmware ../system/lib/modules /lib")
+end = init.index("\nif [ -d system/apex/", start)
+init = init[:start] + r'''ln -s ../system/lib/firmware /lib/firmware
+release=$(uname -r)
+mkdir -p "/lib/modules/$release" || fail_test "module search path"
+mount -o bind /android/system/lib/modules "/lib/modules/$release" || fail_test "module search bind"
+for driver in i2c_hid_acpi hid_multitouch wacom; do
+    busybox modprobe "$driver" || fail_test "unable to load $driver"
+    [ -d "/sys/module/$driver" ] || fail_test "$driver did not register"
+done
+echo "GB_MODULES_READY $release" | tee -a "$base/logs/initrd.log" /dev/console
+''' + init[end:]
 replace("load_modules\nmount_data\nmount_sdcard\nmount_grub", r'''load_modules
 mount -t ext4 -o loop,noatime "$base/data.img" /android/data || fail_test "isolated test data"
 {

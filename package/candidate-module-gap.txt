@@ -1,0 +1,18 @@
+The first tablet test uses the original verified 6.9.9-zenith kernel, its complete matching stock module tree and a modified initial ramdisk.
+
+The experimental kernel from run 46002582645 booted into early userspace in QEMU. Comparing its loadable modules and modules.builtin with the stock modules.dep in inspection run 46003923120 found the following 14 stock modules absent by name. This comparison does not establish which devices use them on this tablet.
+
+8812au
+8821au
+8821ce
+8821cu
+88x2bu
+acpi_call
+bcm2079x_i2c
+razeraccessory
+razerkbd
+razerkraken
+razermouse
+thinkpad_ec
+tp_smapi
+wl

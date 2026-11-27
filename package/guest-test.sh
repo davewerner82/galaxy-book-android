@@ -9,7 +9,7 @@ part="${loop}p1"
 sudo mkntfs -Q -F -L WINTST "$part" >/dev/null
 sudo mount -t ntfs3 "$part" guest
 sudo mkdir guest/GalaxyBookTest
-sudo cp stock/system.efs out/modules.sfs blank-data.img guest/GalaxyBookTest/
+sudo cp stock/system.efs blank-data.img guest/GalaxyBookTest/
 sudo mv guest/GalaxyBookTest/blank-data.img guest/GalaxyBookTest/data.img
 echo "$key" | sudo tee guest/GalaxyBookTest/stage.key >/dev/null
 sudo umount guest

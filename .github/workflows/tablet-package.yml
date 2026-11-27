@@ -14,18 +14,26 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: galaxy-book-experimental-kernel
-          run-id: 46002582645
-          github-token: ${{ github.token }}
-          path: candidate
-      - name: Fetch the pinned Android release
+      - name: Install integration tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends cpio squashfs-tools e2fsprogs kmod gdisk ntfs-3g qemu-system-x86 p7zip-full
+      - uses: actions/cache/restore@v4
+        id: release
+        with:
+          key: bliss-20240715-b1c513a5-iso
+          path: base.iso
+      - name: Fetch the pinned Android release
+        if: steps.release.outputs.cache-hit != 'true'
+        run: |
           curl -fsSL --connect-timeout 30 --max-time 1800 --speed-time 120 --speed-limit 10240 --retry 2 'https://downloads.sourceforge.net/project/blissos-x86/Official/BlissOSZenith/Gapps/Generic/Bliss-Zenith-v16.9.6-x86_64-OFFICIAL-gapps-20240715.iso' -o base.iso
-      - name: Integrate matching modules and validate stock driver coverage
+          echo 'b1c513a53fbf2586a6506bbf941076f4a2369bbc27071339a5cb482869a3bed8  base.iso' | sha256sum -c -
+      - uses: actions/cache/save@v4
+        if: steps.release.outputs.cache-hit != 'true'
+        with:
+          key: bliss-20240715-b1c513a5-iso
+          path: base.iso
+      - name: Verify stock touchscreen module ABI and package the preload repair
         run: bash package/build.sh
       - name: Test the staged system and initrd on a virtual SATA disk
         run: bash package/guest-test.sh
