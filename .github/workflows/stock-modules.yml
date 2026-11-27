@@ -1,0 +1,49 @@
+name: Inspect stock Galaxy Book Android modules
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/stock-modules.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Inspect verified stock system image
+        run: |
+          set -euo pipefail
+          mkdir report outer android
+          iso=Bliss-Zenith-v16.9.6-x86_64-OFFICIAL-gapps-20240715.iso
+          curl -fL --retry 2 --connect-timeout 30 --max-time 2700 --speed-time 120 --speed-limit 10240 "https://downloads.sourceforge.net/project/blissos-x86/Official/BlissOSZenith/Gapps/Generic/$iso" -o "$iso"
+          echo "b1c513a53fbf2586a6506bbf941076f4a2369bbc27071339a5cb482869a3bed8  $iso" | sha256sum -c -
+          7z e -y "$iso" system.efs
+          echo "8b0c68d88f8e9bf189ba8707328082ab8412c3e557c1f605ff5e43dbe4300572  system.efs" | sha256sum -c -
+          sudo mount -t erofs -o loop,ro system.efs outer
+          file outer/system.img | tee report/image-format.txt
+          if [ "$(blkid -p -s TYPE -o value outer/system.img)" = ext4 ]; then
+            sudo mount -t ext4 -o loop,ro,noload outer/system.img android
+          else
+            sudo mount -o loop,ro outer/system.img android
+          fi
+          dir=$(find android -name modules.dep -printf '%h\n' | grep -m1 '/lib/modules' )
+          test -s "$dir/modules.alias"
+          cp "$dir/modules.dep" "$dir/modules.alias" report
+          find android -type f \( -iname '*.idc' -o -iname 'modules.load*' \) > report/input-and-module-configs.txt
+          for driver in i2c-hid-acpi i2c-hid hid-multitouch wacom; do
+            module=$(find "$dir" -type f \( -name "$driver.ko" -o -name "$driver.ko.*" \) -print -quit)
+            test -n "$module" || { echo "::error::Missing $driver in $dir"; exit 1; }
+            modinfo "$module" >> report/driver-metadata.txt
+            echo "$driver $(modinfo -F vermagic "$module")" | tee -a report/driver-versions.txt
+          done
+          grep -iE 'PNP0C50|06CB.*5810|SYNP1234|WCOM0027' "$dir/modules.alias" > report/device-aliases.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-module-evidence
+          path: report/
+          retention-days: 7
