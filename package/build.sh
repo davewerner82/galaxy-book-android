@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "::error::Packaging failed at line $LINENO: $BASH_COMMAND"' ERR
 root=$PWD
 out=$root/out
 mkdir -p "$out" stock ramfs outer android
@@ -10,7 +11,7 @@ echo "b1c513a53fbf2586a6506bbf941076f4a2369bbc27071339a5cb482869a3bed8  base.iso
 rm base.iso
 sudo mount -t erofs -o ro,loop stock/system.efs outer
 sudo mount -t ext4 -o ro,noload,loop outer/system.img android
-stock_modules=android/system/lib/modules
+stock_modules="android/system/lib/modules/$release"
 test -s "$stock_modules/modules.dep"
 for driver in i2c-hid-acpi i2c-hid hid-multitouch wacom; do
   module=$(find "$stock_modules" -name "$driver.ko" -print -quit)

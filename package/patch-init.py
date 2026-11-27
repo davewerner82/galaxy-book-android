@@ -43,14 +43,14 @@ if [ -c /dev/kmsg ]; then
 fi
 mount -t erofs -o loop,ro "$base/system.efs" /sfs || fail_test "stock system container"
 mount -o loop,ro /sfs/system.img /android || fail_test "stock Android system"
-[ -s /android/system/lib/modules/modules.dep ] || fail_test "module index"
+[ -s "/android/system/lib/modules/$(uname -r)/modules.dep" ] || fail_test "module index"
 ''' + init[stop:]
 start = init.index("ln -s ../system/lib/firmware ../system/lib/modules /lib")
 end = init.index("\nif [ -d system/apex/", start)
 init = init[:start] + r'''ln -s ../system/lib/firmware /lib/firmware
 release=$(uname -r)
 mkdir -p "/lib/modules/$release" || fail_test "module search path"
-mount -o bind /android/system/lib/modules "/lib/modules/$release" || fail_test "module search bind"
+mount -o bind "/android/system/lib/modules/$release" "/lib/modules/$release" || fail_test "module search bind"
 for driver in i2c_hid_acpi hid_multitouch wacom; do
     busybox modprobe "$driver" || fail_test "unable to load $driver"
     [ -d "/sys/module/$driver" ] || fail_test "$driver did not register"
