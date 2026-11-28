@@ -1,6 +1,6 @@
 if search --no-floppy --file --set=root /GalaxyBookTest/id-STAGEKEY; then
   if [ -f /GalaxyBookTest/stage.key ]; then
-    linux /GalaxyBookTest/kernel root=/dev/ram0 SRC=GalaxyBookTest GBROOT=/dev/sdaPARTNUM GBKEY=STAGEKEY panic=10 CONSOLEARGS
+    linux /GalaxyBookTest/kernel root=/dev/ram0 SRC=GalaxyBookTest GBROOT=/dev/sdaPARTNUM GBKEY=STAGEKEY module_blacklist=wl panic=10 CONSOLEARGS
     initrd /GalaxyBookTest/initrd.img
     boot
   fi
