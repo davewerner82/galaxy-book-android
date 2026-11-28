@@ -2,7 +2,7 @@
 set -euo pipefail
 key=12345678123456781234567812345678
 mkdir -p guest esp
-truncate -s 7G sata.raw
+truncate -s 12G sata.raw
 sgdisk -n 1:2048:+128M -t 1:ef00 -n 2:0:0 -t 2:0700 sata.raw >/dev/null
 loop=$(sudo losetup -Pf --show sata.raw)
 sudo mkfs.vfat -F32 "${loop}p1" >/dev/null
@@ -49,9 +49,11 @@ for ((n=0;n<150;n++)); do
 done
 tail -30 serial.log
 grep -F 'GB_MODULES_READY 6.9.9-zenith' serial.log
+grep -F GB_DIRECT_SYSTEM_READY serial.log
 grep -F GB_ANDROID_INIT_HANDOFF serial.log
-sleep 15
-if grep -q 'Kernel panic - not syncing' serial.log; then exit 1; fi
+sleep 90
+kill -0 "$pid"
+if grep -Ei 'Kernel panic - not syncing|z_erofs_read_folio: read error|Buffer I/O error' serial.log; then exit 1; fi
 kill "$pid" 2>/dev/null || true
 wait "$pid" || true
 trap - EXIT

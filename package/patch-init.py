@@ -17,6 +17,7 @@ init = init[:start] + r'''cd /
 fail_test()
 {
     echo "Galaxy Book test stopped: $*" > /dev/console
+    if [ -n "$gb_log_ready" ]; then echo "Stopped: $*" >> "$base/logs/initrd.log"; fi
     sync
     sleep 3
     reboot -f
@@ -32,17 +33,34 @@ case "$device_path" in */usb*|*/mmc*) fail_test "removable device";; */ata*/*) ;
 mount.ntfs-3g -o ro,norecover "$GBROOT" /mnt || fail_test "SSD unavailable"
 [ "$(cat /mnt/$SRC/stage.key)" = "$GBKEY" ] || fail_test "stage identifier mismatch"
 umount /mnt || fail_test "cannot release read-only check"
+# Retain the stock hibernation/dirty-volume check, then use the kernel NTFS driver
+# so access to the Android root cannot be lost when a userspace daemon exits.
 mount.ntfs-3g -o rw,norecover "$GBROOT" /mnt || fail_test "Windows volume is not clean and writable"
+umount /mnt || fail_test "cannot release Windows volume check"
+mount -t ntfs3 -o rw,noatime,windows_names "$GBROOT" /mnt || fail_test "kernel NTFS mount"
 base=/mnt/$SRC
 [ "$(cat "$base/stage.key")" = "$GBKEY" ] || fail_test "unexpected stage"
 mkdir -p "$base/logs"
+gb_log_ready=1
 exec 2>>"$base/logs/initrd.log"
 # Keep an open kernel-log reader across the Android init handoff. Bound disk use.
 if [ -c /dev/kmsg ]; then
     (cat /dev/kmsg | head -c 2097152) > "$base/logs/kernel-through-android.txt" 2>/dev/null &
 fi
-mount -t erofs -o loop,ro "$base/system.efs" /sfs || fail_test "stock system container"
-mount -o loop,ro /sfs/system.img /android || fail_test "stock Android system"
+if [ ! -f "$base/system.img" ]; then
+    echo "Preparing Android system image on the SSD. Please wait." > /dev/console
+    mount -t erofs -o loop,ro "$base/system.efs" /sfs || fail_test "stock system container"
+    cp /sfs/system.img "$base/system.img.pending" || fail_test "system image extraction"
+    umount /sfs || fail_test "release stock system container"
+    expected=$(cut -d ' ' -f1 /system-image.sha256)
+    (cd "$base" && echo "$expected  system.img.pending" | sha256sum -c -) || fail_test "extracted image checksum"
+    sync
+    mv "$base/system.img.pending" "$base/system.img" || fail_test "publish verified system image"
+else
+    (cd "$base" && sha256sum -c /system-image.sha256) || fail_test "staged system image checksum"
+fi
+mount -t ext4 -o loop,ro,noload "$base/system.img" /android || fail_test "direct Android system mount"
+echo "GB_DIRECT_SYSTEM_READY" | tee -a "$base/logs/initrd.log" /dev/console
 [ -s "/android/system/lib/modules/$(uname -r)/modules.dep" ] || fail_test "module index"
 ''' + init[stop:]
 start = init.index("ln -s ../system/lib/firmware ../system/lib/modules /lib")

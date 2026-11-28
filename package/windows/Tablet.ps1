@@ -24,7 +24,7 @@ if($Action -in 'Stage','Check') {
     Check-Base
     if($Action -eq 'Check'){Write-Output 'Package and installed base hashes verified.'; return}
     if(Test-Path -LiteralPath $stage){throw "$stage already exists. Your existing files have been preserved."}
-    if((Get-PSDrive C).Free -lt 6GB){throw 'At least 6 GiB free on C: is needed.'}
+    if((Get-PSDrive C).Free -lt 11GB){throw 'At least 11 GiB free on C: is needed for staging and the extracted system image.'}
     $pending=Join-Path 'C:\' ('GalaxyBookStage-'+[guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $pending | Out-Null
     foreach($name in 'kernel','initrd.img','payload.sha256','stock.sha256'){
@@ -161,6 +161,7 @@ try {
     }
     if((Get-FileHash "$stage\system.efs").Hash -ne (Get-FileHash "$stock\system.efs").Hash){throw 'Staged system image mismatch.'}
     if((Get-Item "$stage\data.img").Length -ne 2GB){throw 'Missing staged data image.'}
+    if(!(Test-Path "$stage\system.img") -and (Get-PSDrive C).Free -lt 5GB){throw 'At least 5 GiB free on C: is needed for first-boot image extraction.'}
     if(Confirm-SecureBootUEFI){throw 'Secure Boot is enabled.'}
     $volume=Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -Filter "DriveLetter='C:'"
     $conversion=Invoke-CimMethod -InputObject $volume -MethodName GetConversionStatus

@@ -20,10 +20,12 @@ for driver in i2c-hid-acpi i2c-hid hid-multitouch wacom; do
   test "${magic%% *}" = "$release"
   echo "$driver: $magic" >> "$out/stock-driver-versions.txt"
 done
+sha256sum outer/system.img | awk '{print $1 "  system.img"}' > "$out/system-image.sha256"
 sudo umount android outer
 # Preserve the stock archive's entries and permissions, including its BusyBox.
 (cd ramfs && gzip -dc ../stock/initrd.img | sudo cpio -idu --quiet)
 sudo python3 package/patch-init.py ramfs/init
+sudo cp "$out/system-image.sha256" ramfs/system-image.sha256
 sudo sh -n ramfs/init
 (cd ramfs && sudo find . -print0 | sudo cpio --null -o -H newc --quiet | gzip -2) > "$out/initrd.img"
 cp stock/kernel "$out/kernel"
